@@ -225,11 +225,11 @@ def install_skill():
 
 def _parse_self_heal(value: str) -> SelfHealingConfig:
     if value in ("none", "no-self-heal"):
-        return SelfHealingConfig(mode="single_session", max_hours=None)
+        return SelfHealingConfig(mode="single_session", max_hours=None, max_resets=None)
     if value == "always":
-        return SelfHealingConfig(mode="always", max_hours=None)
+        return SelfHealingConfig(mode="always", max_hours=None, max_resets=None)
     if value.endswith("h"):
-        return SelfHealingConfig(mode="time_bounded", max_hours=float(value[:-1]))
+        return SelfHealingConfig(mode="time_bounded", max_hours=float(value[:-1]), max_resets=None)
     if value.endswith("x"):
-        return SelfHealingConfig(mode="time_bounded", max_resets=int(value[:-1]))
-    return SelfHealingConfig(mode="time_bounded", max_hours=8.0)
+        return SelfHealingConfig(mode="time_bounded", max_hours=None, max_resets=int(value[:-1]))
+    return SelfHealingConfig(mode="time_bounded", max_hours=8.0, max_resets=None)
