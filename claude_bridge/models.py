@@ -58,8 +58,7 @@ class Job:
     error: Optional[str] = None
 
     def to_dict(self) -> dict:
-        d = asdict(self)
-        return d
+        return asdict(self)
 
     @classmethod
     def from_dict(cls, d: dict) -> Job:

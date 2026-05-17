@@ -1,4 +1,3 @@
-import json
 from claude_bridge.models import Job, WorkflowConfig, SelfHealingConfig, Queue
 
 def test_job_defaults():
