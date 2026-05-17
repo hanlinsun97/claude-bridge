@@ -58,6 +58,8 @@ def _run_job(job, bridge_home: str) -> bool:
     prompt_file.parent.mkdir(parents=True, exist_ok=True)
     prompt_file.write_text(prompt)
 
+    output_log = Path(bridge_home) / "logs" / f"{job.id}-output.txt"
+    output_log.parent.mkdir(parents=True, exist_ok=True)
     try:
         result = subprocess.run(
             ["claude", "--dangerously-skip-permissions", "-p", prompt],
@@ -67,9 +69,15 @@ def _run_job(job, bridge_home: str) -> bool:
             timeout=14400,
         )
         success = result.returncode == 0
+        with open(output_log, "w") as f:
+            f.write(result.stdout or "")
+            if result.stderr:
+                f.write("\n--- STDERR ---\n")
+                f.write(result.stderr)
     except subprocess.TimeoutExpired:
         success = False
         q_mod.update(job.id, error="Job timed out after 4 hours")
+        output_log.write_text("Job timed out after 4 hours")
 
     status = "done" if success else "failed"
     q_mod.update(job.id, status=status, finished_at=datetime.now(timezone.utc).isoformat())
