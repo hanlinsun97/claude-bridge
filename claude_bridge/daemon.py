@@ -39,6 +39,11 @@ def install(bridge_home: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(plist_content)
     subprocess.run(["launchctl", "load", "-w", str(path)], check=True)
+    # Clear stale self-heal counters so a stop/start cycle starts fresh.
+    for fname in ("daemon_started_at.txt", "reset_count.txt"):
+        f = Path(bridge_home) / fname
+        if f.exists():
+            f.unlink()
 
 
 def uninstall() -> None:
@@ -74,10 +79,16 @@ def _run_job(job, bridge_home: str) -> bool:
             if result.stderr:
                 f.write("\n--- STDERR ---\n")
                 f.write(result.stderr)
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as e:
+        partial = ""
+        if e.stdout:
+            partial += e.stdout if isinstance(e.stdout, str) else e.stdout.decode("utf-8", errors="replace")
+        if e.stderr:
+            partial += "\n" + (e.stderr if isinstance(e.stderr, str) else e.stderr.decode("utf-8", errors="replace"))
+        error_msg = "Job timed out after 4 hours"
+        output_log.write_text(f"{error_msg}\n\nPartial output:\n{partial}")
         success = False
-        q_mod.update(job.id, error="Job timed out after 4 hours")
-        output_log.write_text("Job timed out after 4 hours")
+        q_mod.update(job.id, error=error_msg)
 
     status = "done" if success else "failed"
     q_mod.update(job.id, status=status, finished_at=datetime.now(timezone.utc).isoformat())
@@ -138,6 +149,9 @@ def tick(bridge_home: Optional[str] = None) -> str:
 
     job = q_mod.next_pending()
     if job is None:
+        # NOTE: when the queue drains the daemon uninstalls itself. This is by design:
+        # the daemon is a one-shot arm, not a persistent service. After the queue
+        # empties you must re-arm with `claude-bridge start` before queuing more jobs.
         uninstall()
         return "queue_empty"
 

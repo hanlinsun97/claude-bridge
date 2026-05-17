@@ -57,6 +57,9 @@ def diff(job_id: str, cwd: str) -> str:
 
 
 def apply(job_id: str, cwd: str) -> None:
+    # KNOWN LIMITATION: apply() only copies files that exist in the workspace.
+    # If the night session deleted a source file, the original is NOT removed.
+    # Review the diff carefully and delete any such files manually.
     ws = workspace_path(job_id)
     src = Path(cwd)
 

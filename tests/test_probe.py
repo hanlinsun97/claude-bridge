@@ -38,3 +38,9 @@ def test_probe_raises_when_claude_not_found():
             assert False, "should have raised"
         except ProbeError:
             pass
+
+def test_probe_returns_false_on_nonzero_exit_without_pattern():
+    """Non-zero exit with no usage-limit pattern (e.g. auth error) → False."""
+    with patch("claude_bridge.probe.subprocess.run",
+               return_value=_mock_run(stdout="some error", stderr="auth failed", returncode=1)):
+        assert probe() is False

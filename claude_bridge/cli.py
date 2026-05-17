@@ -94,13 +94,14 @@ def queue_clear():
 # ── Daemon ────────────────────────────────────────────────────────────────────
 
 @cli.command()
-@click.option("--self-heal", "self_heal", default="8h")
-@click.option("--no-self-heal", "self_heal", flag_value="none")
-def start(self_heal):
-    """Install and arm the LaunchAgent daemon."""
+def start():
+    """Install and arm the LaunchAgent daemon.
+
+    Self-heal policy is set per-job via 'queue add --self-heal'.
+    """
     from claude_bridge.queue import _home
     daemon.install(bridge_home=str(_home()))
-    click.echo(f"Daemon armed. Self-heal policy: {self_heal}")
+    click.echo("Daemon armed.")
     click.echo("Use 'claude-bridge status' to monitor progress.")
 
 
@@ -167,7 +168,8 @@ def workspaces_diff(job_id, cwd):
     if not effective_cwd:
         click.echo("--cwd required when job not in queue", err=True)
         sys.exit(1)
-    click.echo(sandbox.diff(job_id=job_id, cwd=effective_cwd))
+    full_id = job.id if job else job_id
+    click.echo(sandbox.diff(job_id=full_id, cwd=effective_cwd))
 
 
 @workspaces.command("apply")
@@ -180,7 +182,8 @@ def workspaces_apply(job_id, cwd):
     if not effective_cwd:
         click.echo("--cwd required when job not in queue", err=True)
         sys.exit(1)
-    sandbox.apply(job_id=job_id, cwd=effective_cwd)
+    full_id = job.id if job else job_id
+    sandbox.apply(job_id=full_id, cwd=effective_cwd)
     click.echo(f"Applied changes from workspace {job_id[:8]} to {effective_cwd}")
 
 
@@ -188,7 +191,9 @@ def workspaces_apply(job_id, cwd):
 @click.argument("job_id")
 def workspaces_discard(job_id):
     """Delete a workspace."""
-    sandbox.discard(job_id=job_id)
+    job = next((j for j in q_mod.load().jobs if j.id.startswith(job_id)), None)
+    full_id = job.id if job else job_id
+    sandbox.discard(job_id=full_id)
     click.echo(f"Discarded workspace {job_id[:8]}")
 
 
@@ -214,7 +219,7 @@ def probe_cmd():
 def install_skill():
     """Copy the claude-bridge skill to ~/.claude/skills/."""
     import shutil
-    src = Path(__file__).parent.parent / "skills" / "claude-bridge.md"
+    src = Path(__file__).parent / "skills" / "claude-bridge.md"
     dest_dir = Path.home() / ".claude" / "skills"
     dest_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dest_dir / "claude-bridge.md")
@@ -232,4 +237,7 @@ def _parse_self_heal(value: str) -> SelfHealingConfig:
         return SelfHealingConfig(mode="time_bounded", max_hours=float(value[:-1]), max_resets=None)
     if value.endswith("x"):
         return SelfHealingConfig(mode="time_bounded", max_hours=None, max_resets=int(value[:-1]))
-    return SelfHealingConfig(mode="time_bounded", max_hours=8.0, max_resets=None)
+    raise click.BadParameter(
+        f"Unrecognized self-heal format: {value!r}. "
+        "Use 'always', 'Xh' (hours), 'Nx' (resets), or 'none'."
+    )

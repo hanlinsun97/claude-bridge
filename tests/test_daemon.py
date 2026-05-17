@@ -76,6 +76,20 @@ def test_tick_respects_time_bounded_policy_expired(bridge_home, tmp_path):
 
     assert result == "policy_expired"
 
+def test_install_clears_stale_counter_files(bridge_home, tmp_path):
+    """install() should delete daemon_started_at.txt and reset_count.txt if present."""
+    launch_agents = tmp_path / "LaunchAgents"
+    launch_agents.mkdir()
+    # Write stale counter files
+    (bridge_home / "daemon_started_at.txt").write_text("2020-01-01T00:00:00+00:00")
+    (bridge_home / "reset_count.txt").write_text("5")
+    with patch("claude_bridge.daemon.LAUNCH_AGENTS_DIR", str(launch_agents)):
+        with patch("claude_bridge.daemon.subprocess.run"):
+            daemon.install(bridge_home=str(bridge_home))
+    assert not (bridge_home / "daemon_started_at.txt").exists()
+    assert not (bridge_home / "reset_count.txt").exists()
+
+
 def test_tick_respects_max_resets(bridge_home, tmp_path):
     src = tmp_path / "p"
     src.mkdir()

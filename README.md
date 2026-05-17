@@ -28,7 +28,7 @@ claude-bridge install-skill   # adds the Claude Code skill to ~/.claude/skills/
 ## Quick start
 
 ```bash
-# Queue a job
+# Queue a job (self-heal policy is set per job, not on the daemon)
 claude-bridge queue add \
   --prompt "Refactor the auth module for clarity and add missing tests" \
   --model claude-opus-4-7 \
@@ -44,6 +44,9 @@ claude-bridge status
 claude-bridge workspaces diff <job_id>
 claude-bridge workspaces apply <job_id>
 ```
+
+> **Note:** After the queue drains, the daemon stops and uninstalls itself. To run
+> more jobs, re-queue them and re-arm with `claude-bridge start`.
 
 ## From inside Claude Code
 
@@ -87,11 +90,19 @@ claude-bridge stop               Disarm the daemon
 claude-bridge status             Show daemon + queue summary
 claude-bridge workspaces list    List workspaces
 claude-bridge workspaces diff    Show diff vs originals
-claude-bridge workspaces apply   Apply changes
+claude-bridge workspaces apply   Apply changes (see note below)
 claude-bridge workspaces discard Delete a workspace
 claude-bridge probe              Check if usage is available now
 claude-bridge install-skill      Install the Claude Code skill
 ```
+
+## Known limitations
+
+### `workspaces apply` does not propagate deletions
+
+`apply` copies files from the workspace back to your project. If the night session
+deleted a source file, the original is **not** removed. Review the diff output
+(`workspaces diff`) and delete any such files manually before or after applying.
 
 ## License
 

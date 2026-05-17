@@ -31,4 +31,6 @@ def probe() -> bool:
     combined = (result.stdout + result.stderr).lower()
     if any(re.search(p, combined) for p in USAGE_LIMIT_PATTERNS):
         return False
+    if result.returncode != 0:
+        return False
     return True

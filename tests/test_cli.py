@@ -76,6 +76,21 @@ def test_workspaces_list_empty(bridge_home):
     assert result.exit_code == 0
 
 
+def test_parse_self_heal_raises_on_bad_input():
+    import click
+    import pytest
+    from claude_bridge.cli import _parse_self_heal
+    with pytest.raises(click.BadParameter):
+        _parse_self_heal("foo")
+
+
+def test_start_command_has_no_self_heal_option(bridge_home):
+    """The start command should not accept --self-heal."""
+    runner = CliRunner()
+    result = runner.invoke(cli, ["start", "--self-heal", "8h"])
+    assert result.exit_code != 0
+
+
 def test_discard_command(bridge_home, tmp_path):
     src = tmp_path / "p"
     src.mkdir()
