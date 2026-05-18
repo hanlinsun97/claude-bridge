@@ -8,25 +8,6 @@ This tool fixes that. Queue the task, arm the daemon, walk away. When the limit 
 
 > macOS only. The daemon is a LaunchAgent; closing Terminal is fine, but the laptop must stay awake (`caffeinate -dimsu &` or System Settings → Battery → "Prevent automatic sleeping when display is off").
 
-## Why this exists
-
-Built-in `--auto-resume` is the [#1 most-requested Claude Code feature](https://github.com/anthropics/claude-code/issues/36320) and has been open across at least six issues ([#36320](https://github.com/anthropics/claude-code/issues/36320), [#18980](https://github.com/anthropics/claude-code/issues/18980), [#26775](https://github.com/anthropics/claude-code/issues/26775), [#35744](https://github.com/anthropics/claude-code/issues/35744), [#38263](https://github.com/anthropics/claude-code/issues/38263), [#47276](https://github.com/anthropics/claude-code/issues/47276)) without resolution. This is the stopgap until Anthropic ships it.
-
-## How it differs from existing tools
-
-| Capability | [`terryso/claude-auto-resume`](https://github.com/terryso/claude-auto-resume) | [`sleepless-agent`](https://github.com/context-machine-lab/sleepless-agent) | **claude-autoresumer** |
-|---|---|---|---|
-| Survives terminal close | ❌ foreground sleep loop | ✅ daemon | ✅ LaunchAgent |
-| Survives reboot (requires re-login) | ❌ lost | ✅ via persistent queue | ✅ via persistent queue + RunAtLoad |
-| Pinned session ID (precise resume) | ❌ `-c` (last conv in cwd, fragile) | ❌ runs next task fresh | ✅ `--session-id <uuid>` + `--resume <uuid>` |
-| Sandboxed execution | ❌ runs in cwd | ✅ per-task workspace | ✅ per-task workspace + manifest guard |
-| Knows exact reset time | ✅ parses timestamp | ❌ polls usage % | ✅ parses timestamp (falls back to polling) |
-| Scope | one-shot script | full 24/7 AgentOS with Slack | focused: arm-and-forget single sessions |
-| Cross-platform | ✅ macOS/Linux/Windows | ✅ macOS/Linux | ❌ macOS only |
-| Setup | drop-in script | pip + Slack app + SQLite | pip + plist |
-
-The tradeoff: claude-autoresumer is **macOS-only** and a heavier install than a shell script. In return: it survives reboots and laptop-lid-close, pins sessions precisely (no `-c` collisions), sandboxes every run, and skips probe calls when the reset moment is known.
-
 ## Install
 
 ```bash
