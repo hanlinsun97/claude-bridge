@@ -30,7 +30,7 @@ The tradeoff: claude-autoresumer is **macOS-only** and a heavier install than a 
 ## Install
 
 ```bash
-git clone https://github.com/<you>/claude-autoresumer.git
+git clone https://github.com/hanlinsun97/claude-autoresumer.git
 cd claude-autoresumer
 pip install -e .
 claude-autoresumer install-skill   # makes the Claude Code skill available
