@@ -43,8 +43,8 @@ claude-autoresumer start
 claude-autoresumer status
 ```
 
-Show the user the `status` output so they can confirm the job is queued.
+Show the user the `status` output so they can confirm the job is queued AND that the heartbeat shows a recent `Last tick:` line — that's the proof the daemon actually ran, not just installed.
 
 ## Final message to user
 
-"Pinned. I'll probe for usage every 10 minutes, and if the failure error tells me the exact reset time, I'll skip probing until then to save calls. When the limit clears, I'll resume the same Claude Code session — full reasoning, decisions, and partial-work context all preserved. Check `claude-autoresumer status` to monitor; `claude-autoresumer workspaces diff <job_id>` and `claude-autoresumer workspaces apply <job_id>` to review and accept the changes. Keep the laptop plugged in and awake — LaunchAgents pause when macOS sleeps."
+"Pinned. The daemon ticked once inline so you'll see a fresh `Last tick:` line in `status` — that's how you confirm it's armed without tailing logs. It then ticks every 10 min via launchd, and if the failure error carries the exact reset time, it skips probing until that moment to save calls. When the limit clears it resumes the same Claude Code session — full reasoning, decisions, and partial-work context preserved. Use `claude-autoresumer status` to monitor; `workspaces diff <job_id>` and `workspaces apply <job_id>` to review and accept changes. Keep the laptop plugged in and awake — LaunchAgents pause when macOS sleeps."

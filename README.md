@@ -21,15 +21,19 @@ Requires: Python 3.11+, the `claude` CLI on PATH, macOS.
 
 ## Quickstart
 
-### Path A — from inside a Claude Code session (recommended)
+There are two arming paths depending on how much usage you have left.
 
-If you're already mid-conversation with Claude and notice the usage indicator getting low, just say:
+### Path A — you still have usage left: let Claude arm it for you
+
+If you're mid-conversation with Claude Code and notice the usage indicator getting low (but not yet exhausted), just say:
 
 > "I'm running low on usage. Set up auto-resume for this task."
 
-Claude invokes the `claude-autoresumer` skill and walks you through: a continuation prompt, which files to include, retry window. Then it runs `queue add` and `start` for you.
+Claude invokes the `claude-autoresumer` skill, walks you through a continuation prompt / file list / retry window, and runs `queue add` and `start` for you. The skill needs at least a few tool calls' worth of usage to finish — if you're already at the wall, use Path B.
 
-### Path B — from the terminal directly
+### Path B — usage already exhausted (or seconds away): arm it yourself
+
+If `claude` is already returning the usage-limit error, Claude can't help arm anything — you do it from a regular terminal. The daemon is plain Python and does not need Claude usage to install or schedule itself; it only needs usage when the reset hits and it goes to run your job.
 
 ```bash
 claude-autoresumer queue add \
@@ -47,10 +51,12 @@ claude-autoresumer start
 claude-autoresumer status
 ```
 
-When you're back at the keyboard:
+`start` and `queue add` both fire an inline tick so you get an immediate "first tick: …" result instead of waiting up to 10 min for launchd. `status` then shows when the daemon was armed, when the last tick fired, and what it returned — so you can confirm the daemon is alive without tailing logs.
+
+### Coming back
 
 ```bash
-claude-autoresumer status                              # see done / pending / failed
+claude-autoresumer status                              # armed / last tick / done / pending / failed
 claude-autoresumer workspaces diff <job_id>            # review changes
 claude-autoresumer workspaces apply <job_id>           # accept into your repo
 claude-autoresumer workspaces discard <job_id>         # or throw it away
@@ -58,7 +64,7 @@ claude-autoresumer workspaces discard <job_id>         # or throw it away
 
 ## How session resumption works
 
-The daemon ticks every 10 minutes via launchd. On each tick:
+The daemon ticks every 10 minutes via launchd, plus once inline after `start` and `queue add` so you don't wait for the first scheduled fire. Each tick writes `~/.claude-autoresumer/state.json` (`armed_at`, `last_tick_at`, `last_tick_result`, `tick_count`), which `status` reads for the heartbeat line. On each tick:
 
 1. **Check the queue.** If empty, the daemon self-uninstalls — it's arm-and-forget, not a persistent service.
 2. **Skip if waiting.** If the current job has a known `next_eligible_at` and that moment hasn't arrived, return immediately without burning a probe call.

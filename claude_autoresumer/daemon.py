@@ -1,3 +1,4 @@
+import json
 import subprocess
 import plistlib
 import sys
@@ -45,12 +46,42 @@ def _plist_path() -> Path:
     return Path(LAUNCH_AGENTS_DIR) / PLIST_NAME
 
 
+def _state_path(bridge_home: str) -> Path:
+    return Path(bridge_home) / "state.json"
+
+
+def read_state(bridge_home: str) -> dict:
+    """Return the persisted heartbeat state, or {} if absent/corrupt."""
+    path = _state_path(bridge_home)
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _write_state(bridge_home: str, **updates) -> None:
+    path = _state_path(bridge_home)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    state = read_state(bridge_home)
+    state.update(updates)
+    path.write_text(json.dumps(state, indent=2, sort_keys=True))
+
+
 def install(bridge_home: str) -> None:
     plist_content = generate_plist(bridge_home=bridge_home)
     path = _plist_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(plist_content)
     subprocess.run(["launchctl", "load", "-w", str(path)], check=True)
+    _write_state(
+        bridge_home,
+        armed_at=datetime.now(timezone.utc).isoformat(),
+        last_tick_at=None,
+        last_tick_result=None,
+        tick_count=0,
+    )
 
 
 def uninstall() -> None:
@@ -183,6 +214,21 @@ def tick(bridge_home: Optional[str] = None) -> str:
     if bridge_home is None:
         bridge_home = str(_home())
 
+    result = "error"
+    try:
+        result = _tick_inner(bridge_home)
+        return result
+    finally:
+        state = read_state(bridge_home)
+        _write_state(
+            bridge_home,
+            last_tick_at=datetime.now(timezone.utc).isoformat(),
+            last_tick_result=result,
+            tick_count=state.get("tick_count", 0) + 1,
+        )
+
+
+def _tick_inner(bridge_home: str) -> str:
     job = q_mod.next_pending()
     if job is None:
         # When the queue drains the daemon uninstalls itself. The daemon is a

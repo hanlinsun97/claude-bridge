@@ -43,6 +43,19 @@ def queue_add(prompt, model, cwd, file_items, max_retry_hours):
     q_mod.add(job)
     click.echo(f"Queued job {job.id[:8]}: {job.prompt[:60]}")
 
+    # If the daemon is armed, fire a tick inline so the user sees immediate
+    # confirmation instead of waiting up to 10 min for the next launchd tick.
+    plist = Path.home() / "Library" / "LaunchAgents" / "com.claude-autoresumer.plist"
+    if plist.exists():
+        click.echo("Daemon armed — running first tick...")
+        try:
+            result = daemon.tick()
+            click.echo(f"  tick result: {result}")
+        except Exception as e:
+            click.echo(f"  tick error: {type(e).__name__}: {e}", err=True)
+    else:
+        click.echo("Daemon NOT armed. Run `claude-autoresumer start` to arm.")
+
 
 @queue.command("list")
 def queue_list():
@@ -76,8 +89,16 @@ def queue_clear():
 def start():
     """Install and arm the LaunchAgent daemon."""
     from claude_autoresumer.queue import _home
-    daemon.install(bridge_home=str(_home()))
+    home = str(_home())
+    daemon.install(bridge_home=home)
     click.echo("Daemon armed.")
+    # RunAtLoad fires a tick async via launchd, but run one inline too so the
+    # user gets an immediate result rather than waiting on launchd.
+    try:
+        result = daemon.tick(bridge_home=home)
+        click.echo(f"First tick: {result}")
+    except Exception as e:
+        click.echo(f"First tick error: {type(e).__name__}: {e}", err=True)
     click.echo("Use 'claude-autoresumer status' to monitor progress.")
 
 
@@ -100,6 +121,19 @@ def status():
     daemon_state = "armed" if plist.exists() else "stopped"
 
     click.echo(f"Daemon:  {daemon_state}")
+
+    from claude_autoresumer.queue import _home
+    state = daemon.read_state(str(_home()))
+    if state.get("armed_at"):
+        click.echo(f"Armed:   {state['armed_at']}")
+    if state.get("last_tick_at"):
+        click.echo(
+            f"Last tick: {state['last_tick_at']} → "
+            f"{state.get('last_tick_result') or '?'}  (#{state.get('tick_count', 0)})"
+        )
+    elif daemon_state == "armed":
+        click.echo("Last tick: (none yet — first tick should fire within 10 min)")
+
     click.echo(f"Queue:   {counts['pending']} pending, {counts['running']} running, "
                f"{counts['done']} done, {counts['failed']} failed")
     for job in jobs:

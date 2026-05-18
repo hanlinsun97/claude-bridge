@@ -49,6 +49,59 @@ def test_tick_skips_when_queue_empty(bridge_home):
     assert result == "queue_empty"
 
 
+def test_install_seeds_state(bridge_home, tmp_path):
+    launch_agents = tmp_path / "LaunchAgents"
+    launch_agents.mkdir()
+    with patch("claude_autoresumer.daemon.LAUNCH_AGENTS_DIR", str(launch_agents)):
+        with patch("claude_autoresumer.daemon.subprocess.run"):
+            daemon.install(bridge_home=str(bridge_home))
+    state = daemon.read_state(str(bridge_home))
+    assert state["armed_at"]
+    assert state["tick_count"] == 0
+    assert state["last_tick_at"] is None
+
+
+def test_tick_records_heartbeat(bridge_home):
+    with patch("claude_autoresumer.daemon.probe", return_value=True):
+        daemon.tick(bridge_home=str(bridge_home))
+    state = daemon.read_state(str(bridge_home))
+    assert state["last_tick_at"]
+    assert state["last_tick_result"] == "queue_empty"
+    assert state["tick_count"] == 1
+
+
+def test_tick_increments_count_across_calls(bridge_home):
+    with patch("claude_autoresumer.daemon.probe", return_value=True):
+        daemon.tick(bridge_home=str(bridge_home))
+        daemon.tick(bridge_home=str(bridge_home))
+        daemon.tick(bridge_home=str(bridge_home))
+    state = daemon.read_state(str(bridge_home))
+    assert state["tick_count"] == 3
+
+
+def test_tick_records_result_on_exception(bridge_home, tmp_path):
+    src = tmp_path / "p"
+    src.mkdir()
+    (src / "f.py").write_text("x")
+    q_mod.add(Job(prompt="p", cwd=str(src), source_files=["f.py"]))
+    boom = RuntimeError("boom")
+    with patch("claude_autoresumer.daemon.probe", side_effect=boom):
+        try:
+            daemon.tick(bridge_home=str(bridge_home))
+        except RuntimeError:
+            pass
+    state = daemon.read_state(str(bridge_home))
+    # ProbeError is caught and returned as "probe_error"; a non-ProbeError
+    # propagates, but the finally-clause must still record a heartbeat.
+    assert state["last_tick_at"]
+    assert state["tick_count"] == 1
+
+
+def test_read_state_returns_empty_when_missing(bridge_home):
+    # no install, no tick — state file does not exist yet
+    assert daemon.read_state(str(bridge_home)) == {}
+
+
 def test_tick_runs_job_when_available(bridge_home, tmp_path):
     src = tmp_path / "proj"
     src.mkdir()
