@@ -16,7 +16,8 @@ Built-in `--auto-resume` is the [#1 most-requested Claude Code feature](https://
 
 | Capability | [`terryso/claude-auto-resume`](https://github.com/terryso/claude-auto-resume) | [`sleepless-agent`](https://github.com/context-machine-lab/sleepless-agent) | **claude-autoresumer** |
 |---|---|---|---|
-| Survives terminal close / reboot | ❌ foreground sleep loop | ✅ daemon | ✅ LaunchAgent |
+| Survives terminal close | ❌ foreground sleep loop | ✅ daemon | ✅ LaunchAgent |
+| Survives reboot (requires re-login) | ❌ lost | ✅ via persistent queue | ✅ via persistent queue + RunAtLoad |
 | Pinned session ID (precise resume) | ❌ `-c` (last conv in cwd, fragile) | ❌ runs next task fresh | ✅ `--session-id <uuid>` + `--resume <uuid>` |
 | Sandboxed execution | ❌ runs in cwd | ✅ per-task workspace | ✅ per-task workspace + manifest guard |
 | Knows exact reset time | ✅ parses timestamp | ❌ polls usage % | ✅ parses timestamp (falls back to polling) |
@@ -35,7 +36,7 @@ pip install -e .
 claude-autoresumer install-skill   # makes the Claude Code skill available
 ```
 
-Requires: Python 3.10+, the `claude` CLI on PATH, macOS.
+Requires: Python 3.11+, the `claude` CLI on PATH, macOS.
 
 ## Quickstart
 

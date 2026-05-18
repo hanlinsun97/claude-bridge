@@ -1,9 +1,12 @@
 from __future__ import annotations
 import uuid
 import json
+import warnings
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from typing import Optional
+
+LEGACY_FIELDS = {"workflow", "self_healing"}
 
 
 def _now() -> str:
@@ -33,7 +36,18 @@ class Job:
 
     @classmethod
     def from_dict(cls, d: dict) -> Job:
-        # Tolerate legacy fields (workflow, self_healing) from older queue.json files.
+        # Tolerate legacy fields (workflow, self_healing) from older queue.json
+        # files, but warn loudly so the user notices that workflow templates
+        # are no longer honored and self-heal semantics have changed.
+        dropped = LEGACY_FIELDS & d.keys()
+        if dropped:
+            warnings.warn(
+                f"Job {d.get('id', '?')[:8]} loaded from legacy queue schema; "
+                f"dropping fields {sorted(dropped)}. workflow templates and "
+                f"self-heal modes are no longer supported — job will run with "
+                f"max_retry_hours={cls.__dataclass_fields__['max_retry_hours'].default}.",
+                stacklevel=2,
+            )
         d = {k: v for k, v in d.items() if k in cls.__dataclass_fields__}
         return cls(**d)
 

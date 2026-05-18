@@ -242,6 +242,65 @@ def test_run_job_retry_uses_resume_with_stored_session_id(bridge_home, tmp_path)
     assert args[-1] == daemon.RESUME_PROMPT
 
 
+def test_tick_retry_window_check_runs_before_wait_for_reset(bridge_home, tmp_path):
+    """A bogus far-future next_eligible_at must NOT park the job past its retry window."""
+    src = tmp_path / "p"
+    src.mkdir()
+    (src / "f.py").write_text("x")
+    far_future = (datetime.now(timezone.utc) + timedelta(days=365)).isoformat()
+    past_start = (datetime.now(timezone.utc) - timedelta(hours=25)).isoformat()
+    job = Job(prompt="work", cwd=str(src), source_files=["f.py"],
+              max_retry_hours=24.0, started_at=past_start, session_id="abc",
+              next_eligible_at=far_future)
+    q_mod.add(job)
+
+    with patch("claude_autoresumer.daemon.probe", side_effect=AssertionError("should not probe")):
+        result = daemon.tick(bridge_home=str(bridge_home))
+
+    assert result == "retry_window_expired"
+    saved = q_mod.load().jobs[0]
+    assert saved.status == "failed"
+
+
+def test_run_job_caps_absurd_reset_timestamp(bridge_home, tmp_path):
+    """parse_reset_at can return a year-2099 value if claude lies; daemon should drop it."""
+    src = tmp_path / "p"
+    src.mkdir()
+    (src / "f.py").write_text("x")
+    job = Job(prompt="work", cwd=str(src), source_files=["f.py"])
+    q_mod.add(job)
+
+    far_future_epoch = int((datetime.now(timezone.utc) + timedelta(days=365)).timestamp())
+    err = f"Claude AI usage limit reached|{far_future_epoch}"
+    result = MagicMock(returncode=1, stdout="", stderr=err)
+    with patch("claude_autoresumer.daemon.subprocess.run", return_value=result):
+        assert daemon._run_job(job, bridge_home=str(bridge_home)) == "deferred"
+
+    saved = q_mod.load().jobs[0]
+    # The far-future timestamp must NOT be persisted — we'd never tick again.
+    assert saved.next_eligible_at is None
+
+
+def test_legacy_queue_schema_warns_on_load(bridge_home):
+    """Loading a queue.json with old workflow/self_healing fields should warn."""
+    import warnings as _w
+    legacy_queue = {
+        "schema_version": "1.0",
+        "jobs": [{
+            "id": "12345678-aaaa-bbbb-cccc-dddddddddddd",
+            "prompt": "old job",
+            "cwd": "/tmp",
+            "workflow": {"pre_skills": []},
+            "self_healing": {"mode": "always", "max_hours": 8.0},
+        }],
+    }
+    (bridge_home / "queue.json").write_text(json.dumps(legacy_queue))
+    with _w.catch_warnings(record=True) as caught:
+        _w.simplefilter("always")
+        q_mod.load()
+    assert any("legacy queue schema" in str(w.message) for w in caught)
+
+
 def test_run_job_deferred_then_retry_preserves_session_id(bridge_home, tmp_path):
     src = tmp_path / "p"
     src.mkdir()

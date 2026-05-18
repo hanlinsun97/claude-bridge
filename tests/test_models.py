@@ -21,18 +21,24 @@ def test_job_to_dict_round_trip():
     assert job2.max_retry_hours == 12.0
 
 
-def test_job_from_dict_ignores_legacy_fields():
-    """Old queue.json may have workflow/self_healing dicts — should be silently dropped."""
+def test_job_from_dict_drops_and_warns_on_legacy_fields():
+    """Old queue.json may have workflow/self_healing dicts — drop them but warn loudly."""
+    import warnings as _w
     legacy = {
         "prompt": "old",
         "cwd": "/tmp",
         "workflow": {"pre_skills": ["x"]},
         "self_healing": {"mode": "time_bounded", "max_hours": 8.0},
     }
-    job = Job.from_dict(legacy)
+    with _w.catch_warnings(record=True) as caught:
+        _w.simplefilter("always")
+        job = Job.from_dict(legacy)
     assert job.prompt == "old"
     assert not hasattr(job, "workflow")
     assert not hasattr(job, "self_healing")
+    assert any("legacy queue schema" in str(w.message) for w in caught)
+    msgs = " ".join(str(w.message) for w in caught)
+    assert "workflow" in msgs and "self_healing" in msgs
 
 
 def test_queue_to_json_round_trip():

@@ -4,7 +4,7 @@ import sys
 import traceback
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -130,6 +130,13 @@ def _run_job(job, bridge_home: str) -> str:
             error = (result.stderr or result.stdout or f"claude exited with status {result.returncode}").strip()
             if _usage_limit_hit(combined) and not _retry_window_expired(job):
                 reset_at = parse_reset_at(combined)
+                # Sanity-cap an absurd reset time — Anthropic's reset windows
+                # are hours, not weeks. Anything more than 24h out is treated
+                # as unparseable so we fall back to polling.
+                if reset_at is not None:
+                    horizon = datetime.now(timezone.utc) + timedelta(hours=24)
+                    if reset_at > horizon:
+                        reset_at = None
                 q_mod.update(
                     job.id,
                     status="pending",
@@ -171,6 +178,15 @@ def tick(bridge_home: Optional[str] = None) -> str:
         uninstall()
         return "queue_empty"
 
+    # Check retry-window BEFORE wait-for-reset: a bogus far-future reset
+    # timestamp from Claude must not park the job indefinitely past its
+    # retry budget.
+    if _retry_window_expired(job):
+        notify(f"claude-autoresumer: retry window expired — {job.prompt[:60]}")
+        q_mod.update(job.id, status="failed", finished_at=datetime.now(timezone.utc).isoformat(),
+                     error=f"max_retry_hours ({job.max_retry_hours}h) exceeded")
+        return "retry_window_expired"
+
     # If the job has a known reset time and it hasn't arrived, skip the probe
     # to save a Claude call.
     if job.next_eligible_at:
@@ -180,12 +196,6 @@ def tick(bridge_home: Optional[str] = None) -> str:
                 return "waiting_for_reset"
         except ValueError:
             pass
-
-    if _retry_window_expired(job):
-        notify(f"claude-autoresumer: retry window expired — {job.prompt[:60]}")
-        q_mod.update(job.id, status="failed", finished_at=datetime.now(timezone.utc).isoformat(),
-                     error=f"max_retry_hours ({job.max_retry_hours}h) exceeded")
-        return "retry_window_expired"
 
     try:
         available = probe()
