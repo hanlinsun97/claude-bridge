@@ -226,3 +226,79 @@ def test_usage_limit_detection_is_case_insensitive():
     assert daemon._usage_limit_hit("USAGE LIMIT reached")
     assert daemon._usage_limit_hit("Rate Limit exceeded")
     assert not daemon._usage_limit_hit("unrelated failure")
+
+
+def test_run_job_first_run_assigns_session_id_and_uses_session_id_flag(bridge_home, tmp_path):
+    src = tmp_path / "p"
+    src.mkdir()
+    (src / "f.py").write_text("x")
+    job = Job(prompt="work", cwd=str(src), source_files=["f.py"])
+    q_mod.add(job)
+
+    result = MagicMock(returncode=0, stdout="ok", stderr="")
+    with patch("claude_bridge.daemon.subprocess.run", return_value=result) as mock_run:
+        assert daemon._run_job(job, bridge_home=str(bridge_home)) == "done"
+
+    args = mock_run.call_args[0][0]
+    assert "--session-id" in args
+    sid_index = args.index("--session-id")
+    assigned_sid = args[sid_index + 1]
+    # Looks like a UUID
+    import uuid as _u
+    _u.UUID(assigned_sid)
+    # Persisted to the queue
+    saved = q_mod.load().jobs[0]
+    assert saved.session_id == assigned_sid
+
+
+def test_run_job_retry_uses_resume_with_stored_session_id(bridge_home, tmp_path):
+    src = tmp_path / "p"
+    src.mkdir()
+    (src / "f.py").write_text("x")
+    job = Job(
+        prompt="original task",
+        cwd=str(src),
+        source_files=["f.py"],
+        session_id="11111111-2222-3333-4444-555555555555",
+    )
+    q_mod.add(job)
+
+    result = MagicMock(returncode=0, stdout="ok", stderr="")
+    with patch("claude_bridge.daemon.subprocess.run", return_value=result) as mock_run:
+        assert daemon._run_job(job, bridge_home=str(bridge_home)) == "done"
+
+    args = mock_run.call_args[0][0]
+    assert "--resume" in args
+    assert "11111111-2222-3333-4444-555555555555" in args
+    assert "--session-id" not in args
+    # Retry sends the continuation prompt, not the original
+    assert "original task" not in args
+    assert args[-1] == daemon.RESUME_PROMPT
+
+
+def test_run_job_deferred_then_retry_preserves_session_id(bridge_home, tmp_path):
+    """End-to-end: first run defers on usage limit, second run resumes same session."""
+    src = tmp_path / "p"
+    src.mkdir()
+    (src / "f.py").write_text("x")
+    job = Job(prompt="work", cwd=str(src), source_files=["f.py"])
+    q_mod.add(job)
+
+    defer_result = MagicMock(returncode=1, stdout="", stderr="usage limit reached")
+    with patch("claude_bridge.daemon.subprocess.run", return_value=defer_result) as mock_run:
+        assert daemon._run_job(job, bridge_home=str(bridge_home)) == "deferred"
+    first_args = mock_run.call_args[0][0]
+    assigned_sid = first_args[first_args.index("--session-id") + 1]
+
+    # Re-load the job from the queue (mutated state)
+    refreshed = q_mod.load().jobs[0]
+    assert refreshed.session_id == assigned_sid
+    assert refreshed.status == "pending"
+
+    ok_result = MagicMock(returncode=0, stdout="ok", stderr="")
+    with patch("claude_bridge.daemon.subprocess.run", return_value=ok_result) as mock_run:
+        assert daemon._run_job(refreshed, bridge_home=str(bridge_home)) == "done"
+    retry_args = mock_run.call_args[0][0]
+    assert "--resume" in retry_args
+    assert assigned_sid in retry_args
+    assert "--session-id" not in retry_args

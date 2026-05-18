@@ -3,9 +3,15 @@ import plistlib
 import sys
 import traceback
 import re
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+
+RESUME_PROMPT = (
+    "Usage limit was hit and has now reset. The workspace reflects your "
+    "prior progress. Continue the task from where you stopped."
+)
 
 from claude_bridge.probe import probe, ProbeError, USAGE_LIMIT_PATTERNS
 from claude_bridge import queue as q_mod
@@ -69,13 +75,44 @@ def _run_job(job, bridge_home: str) -> str:
     success = False
     try:
         ws = sandbox.create(job_id=job.id, cwd=job.cwd, source_files=job.source_files)
-        q_mod.update(job.id, status="running", started_at=datetime.now(timezone.utc).isoformat(), workspace=ws)
 
-        prompt = compile_prompt(base_prompt=job.prompt, workflow=job.workflow, workspace_path=ws)
+        if job.session_id is None:
+            # First attempt — pre-assign a session ID so we can resume later.
+            session_id = str(uuid.uuid4())
+            prompt = compile_prompt(base_prompt=job.prompt, workflow=job.workflow, workspace_path=ws)
+            cmd = [
+                "claude", "--dangerously-skip-permissions",
+                "--model", job.model,
+                "--session-id", session_id,
+                "-p", prompt,
+            ]
+            q_mod.update(
+                job.id,
+                status="running",
+                started_at=datetime.now(timezone.utc).isoformat(),
+                workspace=ws,
+                session_id=session_id,
+            )
+        else:
+            # Retry after a usage-limit defer — resume the same conversation
+            # so the model keeps reasoning, decisions, and partial-work context.
+            prompt = RESUME_PROMPT
+            cmd = [
+                "claude", "--dangerously-skip-permissions",
+                "--resume", job.session_id,
+                "-p", prompt,
+            ]
+            q_mod.update(
+                job.id,
+                status="running",
+                started_at=datetime.now(timezone.utc).isoformat(),
+                workspace=ws,
+            )
+
         prompt_file.write_text(prompt)
 
         result = subprocess.run(
-            ["claude", "--dangerously-skip-permissions", "--model", job.model, "-p", prompt],
+            cmd,
             cwd=ws,
             capture_output=True,
             text=True,

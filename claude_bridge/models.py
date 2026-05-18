@@ -56,6 +56,7 @@ class Job:
     workflow: WorkflowConfig = field(default_factory=WorkflowConfig)
     self_healing: SelfHealingConfig = field(default_factory=SelfHealingConfig)
     error: Optional[str] = None
+    session_id: Optional[str] = None
 
     def to_dict(self) -> dict:
         return asdict(self)

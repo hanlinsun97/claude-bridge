@@ -16,7 +16,22 @@ You are helping the user hand off work to an overnight autonomous session.
 Ask: "Before I go, should I queue the current task to continue overnight, or do you have a different job in mind?"
 
 If the user wants to continue the current task, proceed to Step 2.
-If the user has a different job, ask for the prompt and skip to Step 4.
+If the user has a different job (independent night-time work — refactor, profiling, doc pass, etc.), proceed to Step 1b and then skip to Step 4.
+
+## Step 1b: Offer a session summary (always)
+
+Whether or not the night jobs are related to the current session, always ask:
+
+"Should I write a summary of today's session as a reference doc the night jobs can read? It's just for context — each night job runs in its own fresh Claude session, but having a 'what we did today' reference often helps the night session understand the codebase's recent history."
+
+If yes, write `~/.claude-bridge/session-summary-{timestamp}.md` with:
+- What was worked on today
+- Key decisions made and their rationale
+- Open questions or known gotchas
+- File paths the user has been editing
+
+Then in every queued job's prompt below, include this line at the end:
+"For context on today's daytime session, read `~/.claude-bridge/session-summary-{timestamp}.md` — purely reference, no action needed unless directly relevant."
 
 ## Step 2: Write a checkpoint file
 
@@ -83,4 +98,4 @@ Show the user the output of `claude-bridge status` so they can confirm the queue
 
 ## Final message to user
 
-"The daemon is armed. I'll probe for usage every 10 minutes and continue your work automatically. Check `claude-bridge status` in the morning, then `claude-bridge workspaces diff <job_id>` and `claude-bridge workspaces apply <job_id>` to review and accept the changes. Good night."
+"The daemon is armed. I'll probe for usage every 10 minutes and continue your work automatically. If a job hits the usage limit mid-run, it'll resume the same Claude session once the limit resets — so reasoning and partial work carry across the reset, not just the files on disk. Check `claude-bridge status` in the morning, then `claude-bridge workspaces diff <job_id>` and `claude-bridge workspaces apply <job_id>` to review and accept the changes. Good night."

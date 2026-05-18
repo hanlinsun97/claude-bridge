@@ -80,6 +80,21 @@ Claude will write the checkpoint, ask which files to include, and arm the daemon
 - The workspace has a `.claude/settings.json` granting the night session broad permissions **only inside the sandbox**
 - Queued source paths must be relative to `--cwd`; absolute paths and `..` segments are rejected
 
+## Session continuity across usage resets
+
+When a job hits the usage limit mid-run, claude-bridge defers it back to `pending`
+and retries on the next tick after the quota resets. Each job is pinned to a
+single Claude Code session ID (via `--session-id` on first run, `--resume` on
+retry), so the model keeps its prior reasoning, decisions, and partial-work
+context across the reset — not just the files on disk. The retry sends a short
+continuation prompt (`"Usage limit was hit and has now reset. The workspace
+reflects your prior progress. Continue the task from where you stopped."`)
+instead of re-sending the original prompt verbatim.
+
+Caveat: only **completed** assistant turns are persisted by Claude Code. If the
+limit fires inside an in-flight turn, that turn's reasoning is lost; resume picks
+up from the last completed turn plus the workspace file state.
+
 ## Commands
 
 ```
