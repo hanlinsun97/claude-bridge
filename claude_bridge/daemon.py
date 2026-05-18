@@ -1,10 +1,13 @@
 import subprocess
 import plistlib
+import sys
+import traceback
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from claude_bridge.probe import probe, ProbeError
+from claude_bridge.probe import probe, ProbeError, USAGE_LIMIT_PATTERNS
 from claude_bridge import queue as q_mod
 from claude_bridge import sandbox
 from claude_bridge.workflow import compile_prompt
@@ -20,7 +23,7 @@ def generate_plist(bridge_home: str) -> str:
     logs_dir.mkdir(parents=True, exist_ok=True)
     data = {
         "Label": PLIST_LABEL,
-        "ProgramArguments": ["claude-bridge", "_tick", "--home", bridge_home],
+        "ProgramArguments": [sys.executable, "-m", "claude_bridge.cli", "_tick", "--home", bridge_home],
         "StartInterval": 600,
         "RunAtLoad": True,
         "StandardOutPath": str(logs_dir / "daemon.log"),
@@ -53,21 +56,26 @@ def uninstall() -> None:
         path.unlink()
 
 
-def _run_job(job, bridge_home: str) -> bool:
-    ws = sandbox.create(job_id=job.id, cwd=job.cwd, source_files=job.source_files)
-    q_mod.update(job.id, status="running", started_at=datetime.now(timezone.utc).isoformat(), workspace=ws)
+def _usage_limit_hit(output: str) -> bool:
+    return any(re.search(pattern, output, re.IGNORECASE) for pattern in USAGE_LIMIT_PATTERNS)
 
-    prompt = compile_prompt(base_prompt=job.prompt, workflow=job.workflow, workspace_path=ws)
 
+def _run_job(job, bridge_home: str) -> str:
     prompt_file = Path(bridge_home) / "logs" / f"{job.id}-prompt.txt"
     prompt_file.parent.mkdir(parents=True, exist_ok=True)
-    prompt_file.write_text(prompt)
-
     output_log = Path(bridge_home) / "logs" / f"{job.id}-output.txt"
     output_log.parent.mkdir(parents=True, exist_ok=True)
+
+    success = False
     try:
+        ws = sandbox.create(job_id=job.id, cwd=job.cwd, source_files=job.source_files)
+        q_mod.update(job.id, status="running", started_at=datetime.now(timezone.utc).isoformat(), workspace=ws)
+
+        prompt = compile_prompt(base_prompt=job.prompt, workflow=job.workflow, workspace_path=ws)
+        prompt_file.write_text(prompt)
+
         result = subprocess.run(
-            ["claude", "--dangerously-skip-permissions", "-p", prompt],
+            ["claude", "--dangerously-skip-permissions", "--model", job.model, "-p", prompt],
             cwd=ws,
             capture_output=True,
             text=True,
@@ -79,6 +87,12 @@ def _run_job(job, bridge_home: str) -> bool:
             if result.stderr:
                 f.write("\n--- STDERR ---\n")
                 f.write(result.stderr)
+        if not success:
+            error = (result.stderr or result.stdout or f"claude exited with status {result.returncode}").strip()
+            if job.self_healing.mode != "single_session" and _usage_limit_hit(f"{result.stdout}\n{result.stderr}"):
+                q_mod.update(job.id, status="pending", error=error[:2000])
+                return "deferred"
+            q_mod.update(job.id, error=error[:2000])
     except subprocess.TimeoutExpired as e:
         partial = ""
         if e.stdout:
@@ -89,10 +103,15 @@ def _run_job(job, bridge_home: str) -> bool:
         output_log.write_text(f"{error_msg}\n\nPartial output:\n{partial}")
         success = False
         q_mod.update(job.id, error=error_msg)
+    except Exception as e:
+        error_msg = f"{type(e).__name__}: {e}"
+        output_log.write_text(f"{error_msg}\n\n{traceback.format_exc()}")
+        success = False
+        q_mod.update(job.id, error=error_msg)
 
     status = "done" if success else "failed"
     q_mod.update(job.id, status=status, finished_at=datetime.now(timezone.utc).isoformat())
-    return success
+    return status
 
 
 def _record_start(bridge_home: str) -> None:
@@ -160,8 +179,13 @@ def tick(bridge_home: Optional[str] = None) -> str:
         uninstall()
         return "policy_expired"
 
-    _increment_reset_count(bridge_home)
-    success = _run_job(job, bridge_home=bridge_home)
+    outcome = _run_job(job, bridge_home=bridge_home)
     label = job.prompt[:60]
-    notify(f"claude-bridge: job done — {label}" if success else f"claude-bridge: job FAILED — {label}")
+    if outcome == "deferred":
+        # Don't count a usage-limit defer against the Nx reset budget — the
+        # job didn't actually consume a reset slot.
+        notify(f"claude-bridge: usage limit hit, will retry — {label}")
+        return "deferred_usage_limit"
+    _increment_reset_count(bridge_home)
+    notify(f"claude-bridge: job done — {label}" if outcome == "done" else f"claude-bridge: job FAILED — {label}")
     return "ran_job"

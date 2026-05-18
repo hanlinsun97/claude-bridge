@@ -1,6 +1,8 @@
 import os
 import json
 import tempfile
+import fcntl
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional
 from claude_bridge.models import Job, Queue
@@ -17,7 +19,27 @@ def _queue_path() -> Path:
     return _home() / "queue.json"
 
 
+def _lock_path() -> Path:
+    return _home() / "queue.lock"
+
+
+@contextmanager
+def _locked_queue():
+    path = _lock_path()
+    with path.open("w") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
 def load() -> Queue:
+    with _locked_queue():
+        return _load_unlocked()
+
+
+def _load_unlocked() -> Queue:
     path = _queue_path()
     if not path.exists():
         return Queue()
@@ -25,6 +47,7 @@ def load() -> Queue:
 
 
 def _save(queue: Queue) -> None:
+    # Must be called while holding _locked_queue(); writers above all do.
     path = _queue_path()
     fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
     try:
@@ -37,38 +60,43 @@ def _save(queue: Queue) -> None:
 
 
 def add(job: Job, front: bool = False) -> None:
-    queue = load()
-    if front:
-        queue.jobs.insert(0, job)
-    else:
-        queue.jobs.append(job)
-    _save(queue)
+    with _locked_queue():
+        queue = _load_unlocked()
+        if front:
+            queue.jobs.insert(0, job)
+        else:
+            queue.jobs.append(job)
+        _save(queue)
 
 
 def update(job_id: str, **kwargs) -> None:
-    queue = load()
-    for job in queue.jobs:
-        if job.id == job_id:
-            for k, v in kwargs.items():
-                setattr(job, k, v)
-            break
-    _save(queue)
+    with _locked_queue():
+        queue = _load_unlocked()
+        for job in queue.jobs:
+            if job.id == job_id:
+                for k, v in kwargs.items():
+                    setattr(job, k, v)
+                break
+        _save(queue)
 
 
 def remove(job_id: str) -> None:
-    queue = load()
-    queue.jobs = [j for j in queue.jobs if j.id != job_id]
-    _save(queue)
+    with _locked_queue():
+        queue = _load_unlocked()
+        queue.jobs = [j for j in queue.jobs if j.id != job_id]
+        _save(queue)
 
 
 def clear_pending() -> None:
-    queue = load()
-    queue.jobs = [j for j in queue.jobs if j.status != "pending"]
-    _save(queue)
+    with _locked_queue():
+        queue = _load_unlocked()
+        queue.jobs = [j for j in queue.jobs if j.status != "pending"]
+        _save(queue)
 
 
 def next_pending() -> Optional[Job]:
-    queue = load()
+    with _locked_queue():
+        queue = _load_unlocked()
     for job in queue.jobs:
         if job.status == "pending":
             return job

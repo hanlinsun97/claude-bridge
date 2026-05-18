@@ -75,7 +75,7 @@ claude-bridge queue add --prompt "..." --model claude-opus-4-7 \
 Then arm the daemon:
 
 ```bash
-claude-bridge start --self-heal {policy}
+claude-bridge start
 claude-bridge status
 ```
 
@@ -83,4 +83,4 @@ Show the user the output of `claude-bridge status` so they can confirm the queue
 
 ## Final message to user
 
-"The daemon is armed. I'll probe for usage every 10 minutes and continue your work automatically. Check `claude-bridge status` in the morning, then `claude-bridge diff <job_id>` and `claude-bridge apply <job_id>` to review and accept the changes. Good night."
+"The daemon is armed. I'll probe for usage every 10 minutes and continue your work automatically. Check `claude-bridge status` in the morning, then `claude-bridge workspaces diff <job_id>` and `claude-bridge workspaces apply <job_id>` to review and accept the changes. Good night."

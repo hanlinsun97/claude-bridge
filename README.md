@@ -32,7 +32,8 @@ claude-bridge install-skill   # adds the Claude Code skill to ~/.claude/skills/
 claude-bridge queue add \
   --prompt "Refactor the auth module for clarity and add missing tests" \
   --model claude-opus-4-7 \
-  --files "src/auth/ tests/test_auth.py" \
+  --file src/auth/ \
+  --file tests/test_auth.py \
   --workflow tdd \
   --self-heal 8h
 
@@ -77,6 +78,7 @@ Claude will write the checkpoint, ask which files to include, and arm the daemon
 - Original files are never modified — all work is in `~/.claude-bridge/workspaces/<job_id>/`
 - You explicitly `apply` changes you want; everything else is discarded
 - The workspace has a `.claude/settings.json` granting the night session broad permissions **only inside the sandbox**
+- Queued source paths must be relative to `--cwd`; absolute paths and `..` segments are rejected
 
 ## Commands
 
@@ -101,8 +103,8 @@ claude-bridge install-skill      Install the Claude Code skill
 ### `workspaces apply` does not propagate deletions
 
 `apply` copies files from the workspace back to your project. If the night session
-deleted a source file, the original is **not** removed. Review the diff output
-(`workspaces diff`) and delete any such files manually before or after applying.
+deleted a source file, the original is **not** removed. `workspaces diff` shows
+the deletion so you can delete the original manually before or after applying.
 
 ## License
 

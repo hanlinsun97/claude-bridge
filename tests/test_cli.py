@@ -7,6 +7,7 @@ from claude_bridge import sandbox
 
 
 def test_queue_add_basic(bridge_home):
+    (bridge_home / "src").mkdir()
     runner = CliRunner()
     result = runner.invoke(cli, [
         "queue", "add",
@@ -20,6 +21,34 @@ def test_queue_add_basic(bridge_home):
     queue = q_mod.load()
     assert len(queue.jobs) == 1
     assert queue.jobs[0].prompt == "do something"
+
+
+def test_queue_add_accepts_repeated_file_options(bridge_home):
+    (bridge_home / "src").mkdir()
+    (bridge_home / "test.py").write_text("x")
+    runner = CliRunner()
+    result = runner.invoke(cli, [
+        "queue", "add",
+        "--prompt", "do something",
+        "--cwd", str(bridge_home),
+        "--file", "src/",
+        "--file", "test.py",
+    ])
+    assert result.exit_code == 0, result.output
+    job = q_mod.load().jobs[0]
+    assert job.source_files == ["src/", "test.py"]
+
+
+def test_queue_add_rejects_paths_outside_cwd(bridge_home):
+    runner = CliRunner()
+    result = runner.invoke(cli, [
+        "queue", "add",
+        "--prompt", "do something",
+        "--cwd", str(bridge_home),
+        "--files", "../secret.py",
+    ])
+    assert result.exit_code != 0
+    assert "must stay inside cwd" in result.output
 
 
 def test_queue_list_shows_jobs(bridge_home):
@@ -39,10 +68,12 @@ def test_queue_clear_removes_pending(bridge_home):
 
 
 def test_queue_add_resume_reads_checkpoint(bridge_home, tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
     checkpoint = tmp_path / "checkpoint.json"
     checkpoint.write_text(json.dumps({
         "prompt": "resume this",
-        "cwd": "/tmp/proj",
+        "cwd": str(tmp_path),
         "source_files": ["src/"],
         "model": "claude-opus-4-7",
     }))

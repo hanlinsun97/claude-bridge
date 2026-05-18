@@ -11,7 +11,7 @@ def test_plist_content(bridge_home):
     data = plistlib.loads(plist_str.encode())
     assert data["Label"] == "com.claude-bridge"
     assert data["StartInterval"] == 600
-    assert "claude-bridge" in " ".join(data["ProgramArguments"])
+    assert "claude_bridge.cli" in " ".join(data["ProgramArguments"])
 
 def test_plist_has_log_paths(bridge_home):
     plist_str = daemon.generate_plist(bridge_home=str(bridge_home))
@@ -46,7 +46,7 @@ def test_tick_runs_job_when_available(bridge_home, tmp_path):
     q_mod.add(job)
 
     with patch("claude_bridge.daemon.probe", return_value=True):
-        with patch("claude_bridge.daemon._run_job", return_value=True) as mock_run:
+        with patch("claude_bridge.daemon._run_job", return_value="done") as mock_run:
             result = daemon.tick(bridge_home=str(bridge_home))
 
     assert result == "ran_job"
@@ -110,3 +110,119 @@ def test_tick_respects_max_resets(bridge_home, tmp_path):
         result = daemon.tick(bridge_home=str(bridge_home))
 
     assert result == "policy_expired"
+
+
+def test_run_job_passes_model_to_claude(bridge_home, tmp_path):
+    src = tmp_path / "p"
+    src.mkdir()
+    (src / "f.py").write_text("x")
+    job = Job(prompt="work", cwd=str(src), source_files=["f.py"], model="claude-opus-4-7")
+    q_mod.add(job)
+
+    result = MagicMock(returncode=0, stdout="ok", stderr="")
+    with patch("claude_bridge.daemon.subprocess.run", return_value=result) as mock_run:
+        assert daemon._run_job(job, bridge_home=str(bridge_home)) == "done"
+
+    args = mock_run.call_args[0][0]
+    assert "--model" in args
+    assert "claude-opus-4-7" in args
+
+
+def test_run_job_marks_failed_on_unexpected_exception(bridge_home, tmp_path):
+    src = tmp_path / "p"
+    src.mkdir()
+    (src / "f.py").write_text("x")
+    job = Job(prompt="work", cwd=str(src), source_files=["f.py"])
+    q_mod.add(job)
+
+    with patch("claude_bridge.daemon.subprocess.run", side_effect=OSError("boom")):
+        assert daemon._run_job(job, bridge_home=str(bridge_home)) == "failed"
+
+    saved = q_mod.load().jobs[0]
+    assert saved.status == "failed"
+    assert "boom" in saved.error
+
+
+def test_run_job_defers_usage_limit_failure_when_self_healing(bridge_home, tmp_path):
+    src = tmp_path / "p"
+    src.mkdir()
+    (src / "f.py").write_text("x")
+    job = Job(prompt="work", cwd=str(src), source_files=["f.py"])
+    q_mod.add(job)
+
+    result = MagicMock(returncode=1, stdout="", stderr="usage limit reached")
+    with patch("claude_bridge.daemon.subprocess.run", return_value=result):
+        assert daemon._run_job(job, bridge_home=str(bridge_home)) == "deferred"
+
+    saved = q_mod.load().jobs[0]
+    assert saved.status == "pending"
+    assert "usage limit" in saved.error
+
+
+def test_run_job_does_not_defer_usage_limit_for_single_session(bridge_home, tmp_path):
+    src = tmp_path / "p"
+    src.mkdir()
+    (src / "f.py").write_text("x")
+    job = Job(
+        prompt="work",
+        cwd=str(src),
+        source_files=["f.py"],
+        self_healing=SelfHealingConfig(mode="single_session", max_hours=None, max_resets=None),
+    )
+    q_mod.add(job)
+
+    result = MagicMock(returncode=1, stdout="", stderr="usage limit reached")
+    with patch("claude_bridge.daemon.subprocess.run", return_value=result):
+        assert daemon._run_job(job, bridge_home=str(bridge_home)) == "failed"
+
+    saved = q_mod.load().jobs[0]
+    assert saved.status == "failed"
+
+
+def test_tick_does_not_burn_reset_slot_on_deferred(bridge_home, tmp_path):
+    src = tmp_path / "p"
+    src.mkdir()
+    (src / "f.py").write_text("x")
+    job = Job(prompt="work", cwd=str(src), source_files=["f.py"])
+    q_mod.add(job)
+
+    with patch("claude_bridge.daemon.probe", return_value=True):
+        with patch("claude_bridge.daemon._run_job", return_value="deferred"):
+            result = daemon.tick(bridge_home=str(bridge_home))
+
+    assert result == "deferred_usage_limit"
+    assert not (Path(bridge_home) / "reset_count.txt").exists()
+
+
+def test_tick_increments_reset_count_on_completion(bridge_home, tmp_path):
+    src = tmp_path / "p"
+    src.mkdir()
+    (src / "f.py").write_text("x")
+    job = Job(prompt="work", cwd=str(src), source_files=["f.py"])
+    q_mod.add(job)
+
+    with patch("claude_bridge.daemon.probe", return_value=True):
+        with patch("claude_bridge.daemon._run_job", return_value="done"):
+            daemon.tick(bridge_home=str(bridge_home))
+
+    assert (Path(bridge_home) / "reset_count.txt").read_text() == "1"
+
+
+def test_tick_increments_reset_count_on_failure(bridge_home, tmp_path):
+    src = tmp_path / "p"
+    src.mkdir()
+    (src / "f.py").write_text("x")
+    job = Job(prompt="work", cwd=str(src), source_files=["f.py"])
+    q_mod.add(job)
+
+    with patch("claude_bridge.daemon.probe", return_value=True):
+        with patch("claude_bridge.daemon._run_job", return_value="failed"):
+            daemon.tick(bridge_home=str(bridge_home))
+
+    assert (Path(bridge_home) / "reset_count.txt").read_text() == "1"
+
+
+def test_usage_limit_detection_is_case_insensitive():
+    assert daemon._usage_limit_hit("USAGE LIMIT reached")
+    assert daemon._usage_limit_hit("Rate Limit exceeded")
+    assert not daemon._usage_limit_hit("unrelated failure")
